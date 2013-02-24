@@ -20,23 +20,38 @@ my $vg;
 my $rsync_opts;
 my $config;
 
+# TODO:
+# check interface name in /var/lib/lxc and configure it in container
+# remove /dev/ptmx from container's fstab
+# --contunue option
+# simple checks before and after migration. Restore old container if migration failed
+
 sub migrate_get_opt
 {
 	my $self = shift;
 
-	GetOptions(\%options, 'rootsz=s', 'cpus=s', 'cpu-shares=s', 'mem=s', 'io=s', 'fromhost=s', 
-		'remuser=s', 'remport=s', 'remname=s', '--continue!', 'afterstart!');
+	GetOptions(\%options, 'rootsz=s', 'fromhost=s', 'rsync=s',
+		'remuser=s', 'remport=s', 'remname=s', 'afterstart!');
 
 	$options{'remuser'} ||= 'root';
 	$options{'remport'} ||= '22';
 	$options{'afterstart'} ||= 0;
-	$options{'rootsz'} ||= (`echo -n \$(ssh $options{'remuser'}\@$options{'fromhost'} "egrep DISKSPACE /etc/vz/conf/$options{'remname'}.conf | cut -d= -f2 | cut -d: -f1 | cut -d'\\"' -f2")` || 0) / 1024 || '30G';
 
 	defined($options{'remname'})
 		or die "You should specify the name of the VZ container!\n\n";
 
-	defined($options{'fromhost'}) or 
+	defined($options{'fromhost'}) or
 		die "To which host should I migrate?\n\n";
+
+	if (!$options{'rootsz'}) {
+                my $cmd = "egrep DISKSPACE /etc/vz/conf/$options{'remname'}.conf || du -sk /var/lib/vz/root/$options{'remname'}";
+                $options{'rootsz'} = qx(ssh $options{'remuser'}\@$options{'fromhost'} '$cmd');
+                ($options{'rootsz'}) = ($options{'rootsz'} =~ /(\d+)(?:\:|\s)/);
+                # ceil to GiB, lv size may be too small in case of `du` calculation
+                $options{'rootsz'} += 1024**2 - ($options{'rootsz'} % 1024**2) if $options{'rootsz'} % 1024**2;
+                $options{'rootsz'} .= 'K';
+        }
+	$options{'rsync'} ||= '';
 }
 
 sub re_rsync
@@ -54,7 +69,7 @@ sub re_rsync
 	print "Re-rsyncing container $options{'contname'}...\n";
 
 	die "Failed to re-rsync root filesystem!\n\n"
-		if system("rsync $rsync_opts -e ssh $options{'remuser'}\@$options{'fromhost'}:/var/lib/vz/root/$options{'remname'}/ $root_mount_path/$options{'contname'}/rootfs/ 1>/dev/null");
+		if system("rsync $rsync_opts -e ssh $options{'remuser'}\@$options{'fromhost'}:/var/lib/vz/root/$options{'remname'}/ $root_mount_path/$options{'contname'}/rootfs/");
 
 	print "Unmounting VZ container $options{'remname'}...\n";
 	die "Failed to unmount VZ container $options{'remname'}!\n\n"
@@ -68,6 +83,7 @@ sub vz_migrate
 
 	$rsync_opts = $config->get_option_from_main('rsync', 'VZ_RSYNC_OPTS');
 	$rsync_opts ||= "-aH --delete --numeric-ids --exclude '%veid%/proc/*' --exclude '%veid%/sys/*'";
+	$rsync_opts .= ' '.$options{'rsync'};
 
         $rsync_opts =~ s/%veid%/$options{'remname'}/g;
 
@@ -77,7 +93,7 @@ sub vz_migrate
 	print "Rsync'ing VZ container...\n";
 
 	print "There were some errors during rsyncing root filesystem. It's definitely NOT okay if it was the only rsync pass.\n\n"
-		if system("rsync $rsync_opts -e ssh $options{'remuser'}\@$options{'fromhost'}:/var/lib/vz/root/$options{'remname'}/ $root_mount_path/$options{'contname'}/rootfs/ 1>/dev/null");
+		if system("rsync $rsync_opts -e ssh $options{'remuser'}\@$options{'fromhost'}:/var/lib/vz/root/$options{'remname'}/ $root_mount_path/$options{'contname'}/rootfs/");
 
 	$self->re_rsync();
 

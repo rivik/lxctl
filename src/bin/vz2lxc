@@ -1,0 +1,24 @@
+#!/bin/sh
+
+fromhost=$1
+logdir=$2
+[ -z "$fromhost" -o -z "$logdir" ] && exit 1
+
+ssh $fromhost 'vzlist -H -o veid,hostname' | (
+while read veid host; do
+  (
+  ip=`ssh -l root $fromhost "grep address /var/lib/vz/root/$veid/etc/network/interfaces | perl -pe 's/\h*address\h*//'"`
+  touch "$logdir/$host.started"
+  lxctl vz2lxc $host --fromhost $fromhost --remname $veid --afterstart --rsync="-P" 2>$logdir/$host.err 1>$logdir/$host.out
+
+  if ping -c 1 $ip >/dev/null 2>&1; then
+    echo "$host $ip `curl -m 1 --write-out %{http_code} --silent --output /dev/null $ip`" > "$logdir/$host.started"
+  else
+    echo "$host $ip $veid is down" > "$logdir/$host.started"
+  fi
+  mv $logdir/$host.started $logdir/$host.done
+  ) &
+done
+wait
+)
+

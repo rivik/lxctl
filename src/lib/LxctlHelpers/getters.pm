@@ -20,9 +20,9 @@ sub get_ip{
         my @interfaces = <$config_file>;
         close($config_file);
 
-        my @ip = grep { /^\s+address\s+/ } @interfaces;
+        my @ip = grep { /^\h*address\h*/ } @interfaces;
         return "0.0.0.0" if (scalar(@ip) == 0);
-        $ip[0] =~ s/^\s+address\s+//;
+        $ip[0] =~ s/^\h*address\h*//;
         return "0.0.0.0" if (!defined($ip[0]));
         chop($ip[0]);
 

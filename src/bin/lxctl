@@ -137,7 +137,7 @@ B<Optional arguments:>
 
 	--macaddr - set the custom mac address of the container
 
-	--autostart - autostart container each reboot host machine
+	--autostart {1|0} - autostart container each reboot host machine
 
 	--no-save - do not save yaml config for new container, by default $CONF_PATH/vmname.yaml is used
 
@@ -177,7 +177,7 @@ B<Optional arguments:>
 
 	--userpasswd user:passwd - sets password for given user
 
-	--onboot {yes,no} - makes container [do not] start at boot
+	--autostart {1,0} - makes container [do not] start at boot
 
         --tz - set custom timezone (Europe/Moscow, UTC, etc)
 
@@ -240,8 +240,6 @@ B<Optional arguments>
 	--remport - remote port for ssh
 
 	--remname - remote container name
-
-	--onboot - start on boot? 1 or 0
 
 	--userpasswd - 'user:password' formatted password for user
 
@@ -318,19 +316,11 @@ B<Optional arguments>
 
 	--remport - remote port for ssh
 
-	--onboot - start on boot? 1 or 0
-
 	--rootsz - remote root fs size
 
-	--afterstart - start local container again after migration
+	--rsync - Additional options that will be passed to rsync
 
-	--cpus - cpus allocated to container
-
-	--cpu-shares - cpu time share of the container
-
-	--mem - memory limit of the container
-
-	--io - IO throughput
+	--[no]afterstart - start local container again after migration
 
 =back
 
