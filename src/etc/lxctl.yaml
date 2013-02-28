@@ -23,7 +23,7 @@ root:
   ROOT_TYPE: lvm
 rsync:
   RSYNC_OPTS: "-aH --delete --numeric-ids --exclude 'rootfs/proc/*' --exclude 'rootfs/sys/*' -e ssh"
-  VZ_RSYNC_OPTS: "-aH --delete --numeric-ids --exclude '/proc/*' --exclude '/sys/*' -e ssh"
+  VZ_RSYNC_OPTS: "-aH --numeric-ids --exclude '/proc/*' --exclude '/sys/*' -e ssh"
 set:
   IFNAME: none
   SEARCHDOMAIN: ru

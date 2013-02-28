@@ -21,21 +21,19 @@ my $rsync_opts;
 my $config;
 
 # TODO:
-# check interface name in /var/lib/lxc and configure it in container
-# remove /dev/ptmx from container's fstab
-# --contunue option
 # simple checks before and after migration. Restore old container if migration failed
 
 sub migrate_get_opt
 {
 	my $self = shift;
 
-	GetOptions(\%options, 'rootsz=s', 'fromhost=s', 'rsync=s',
-		'remuser=s', 'remport=s', 'remname=s', 'afterstart!');
-
+	GetOptions(\%options, 'fromhost=s', 'remname=s', 'remuser=s', 'remport=s',
+		'rootsz=s', 'rsync=s', 'afterstart!', 'createnew!');
+		
 	$options{'remuser'} ||= 'root';
 	$options{'remport'} ||= '22';
-	$options{'afterstart'} ||= 0;
+	$options{'afterstart'} //= 0;
+	$options{'createnew'} //= 1;
 
 	defined($options{'remname'})
 		or die "You should specify the name of the VZ container!\n\n";
@@ -82,19 +80,27 @@ sub vz_migrate
 	my $self = shift;
 
 	$rsync_opts = $config->get_option_from_main('rsync', 'VZ_RSYNC_OPTS');
-	$rsync_opts ||= "-aH --delete --numeric-ids --exclude '%veid%/proc/*' --exclude '%veid%/sys/*'";
+	$rsync_opts ||= "-aH --numeric-ids --exclude '%veid%/proc/*' --exclude '%veid%/sys/*'";
+	# remove -e ssh
+	$rsync_opts =~ s/-e\h*ssh\h*//;
 	$rsync_opts .= ' '.$options{'rsync'};
+	$rsync_opts =~ s/%veid%/$options{'remname'}/g;
+	print "$rsync_opts\n";
 
-        $rsync_opts =~ s/%veid%/$options{'remname'}/g;
-
-	die "Failed to create container!\n\n"
-		if system("lxctl create $options{'contname'} --empty --rootsz $options{'rootsz'} --save");
+	if ($options{'createnew'}) {
+		die "Failed to create container!\n\n"
+			if system("lxctl create $options{'contname'} --empty --rootsz $options{'rootsz'} --save");
+	}
+	else {
+		die "Can't find container!\n\n"
+			if system("lxctl list | grep -q $options{'contname'}");
+	}
 
 	print "Rsync'ing VZ container...\n";
-
+	my $cmd=qq(rsync $rsync_opts -e ssh $options{'remuser'}\@$options{'fromhost'}:/var/lib/vz/root/$options{'remname'}/ $root_mount_path/$options{'contname'}/rootfs/);
+	print "$cmd\n";
 	print "There were some errors during rsyncing root filesystem. It's definitely NOT okay if it was the only rsync pass.\n\n"
-		if system("rsync $rsync_opts -e ssh $options{'remuser'}\@$options{'fromhost'}:/var/lib/vz/root/$options{'remname'}/ $root_mount_path/$options{'contname'}/rootfs/");
-
+		if system($cmd);
 	$self->re_rsync();
 
 	if (-e "$root_mount_path/$options{'contname'}/rootfs/etc/init/openvz.conf") {
@@ -114,6 +120,20 @@ sub migrate_configuration
 
 	die "Failed to migrate MTU!\n\n"
 		if system("lxctl set $options{'contname'} --mtu \$(ssh $options{'remuser'}\@$options{'fromhost'} \"sed -n 's/^[\\t ]\\+mtu[\\t ]\\+\\([0-9]\\+\\)/\\1/p' /var/lib/vz/private/$options{'remname'}/etc/network/interfaces | awk '{print \$2}'\")");
+
+	my $vz_iface_name = qx(ssh $options{'remuser'}\@$options{'fromhost'} "egrep NETIF /etc/vz/conf/$options{'remname'}.conf");
+	($vz_iface_name) = ($vz_iface_name =~ /ifname=([^,"]+)/);
+	my $lxc_iface_name = qx(egrep lxc.network.name /var/lib/lxc/$options{'contname'}/config);
+	($lxc_iface_name) = ($lxc_iface_name =~ /lxc\.network\.name\h*=\h*(\S+)/);
+	print "Changing $lxc_iface_name to $vz_iface_name\n";
+	my $cmd = qq(perl -i.bak -pe 's/\\b(?:$lxc_iface_name)\\b/$vz_iface_name/' /var/lib/lxc/$options{'contname'}/config);
+	print "$cmd\n";
+	die "Failed to migrate iface name!\n\n" if
+		system("$cmd");
+
+	print "Clearing $root_mount_path/$options{'contname'}/rootfs/etc/fstab ...\n";
+	die "Failed to remove fstab!\n\n" if
+		system("mv $root_mount_path/$options{'contname'}/rootfs/etc/fstab $root_mount_path/$options{'contname'}/rootfs/etc/fstab.bak");
 }
 
 sub do
