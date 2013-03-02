@@ -322,6 +322,8 @@ B<Optional arguments>
 
 	--[no]afterstart - start local container again after migration
 
+	--[no]createnew - create new container (or resync existent)
+
 =back
 
 =head1 DESCRIPTION

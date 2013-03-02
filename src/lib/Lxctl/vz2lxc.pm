@@ -25,7 +25,7 @@ sub migrate_get_opt
 	my $self = shift;
 
 	GetOptions(\%options, 'fromhost=s', 'remname=s', 'remuser=s', 'remport=s',
-		'rootsz=s', 'rsync=s', 'afterstart!', 'createnew!', 'check-script=s');
+		'rootsz=s', 'rsync=s', 'afterstart!', 'createnew!');
 
 	$options{'remuser'} ||= 'root';
 	$options{'remport'} ||= '22';
