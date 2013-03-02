@@ -20,20 +20,19 @@ my $vg;
 my $rsync_opts;
 my $config;
 
-# TODO:
-# simple checks before and after migration. Restore old container if migration failed
-
 sub migrate_get_opt
 {
 	my $self = shift;
 
 	GetOptions(\%options, 'fromhost=s', 'remname=s', 'remuser=s', 'remport=s',
-		'rootsz=s', 'rsync=s', 'afterstart!', 'createnew!');
-		
+		'rootsz=s', 'rsync=s', 'afterstart!', 'createnew!', 'check-script=s');
+
 	$options{'remuser'} ||= 'root';
 	$options{'remport'} ||= '22';
 	$options{'afterstart'} //= 0;
 	$options{'createnew'} //= 1;
+	$options{'rsync'} ||= '';
+	$options{'check-script'} ||= '';
 
 	defined($options{'remname'})
 		or die "You should specify the name of the VZ container!\n\n";
@@ -42,14 +41,13 @@ sub migrate_get_opt
 		die "To which host should I migrate?\n\n";
 
 	if (!$options{'rootsz'}) {
-                my $cmd = "egrep DISKSPACE /etc/vz/conf/$options{'remname'}.conf || du -sk /var/lib/vz/root/$options{'remname'}";
-                $options{'rootsz'} = qx(ssh $options{'remuser'}\@$options{'fromhost'} '$cmd');
-                ($options{'rootsz'}) = ($options{'rootsz'} =~ /(\d+)(?:\:|\s)/);
-                # ceil to GiB, lv size may be too small in case of `du` calculation
-                $options{'rootsz'} += 1024**2 - ($options{'rootsz'} % 1024**2) if $options{'rootsz'} % 1024**2;
-                $options{'rootsz'} .= 'K';
-        }
-	$options{'rsync'} ||= '';
+		my $cmd = "egrep DISKSPACE /etc/vz/conf/$options{'remname'}.conf || du -sk /var/lib/vz/root/$options{'remname'}";
+		$options{'rootsz'} = qx(ssh $options{'remuser'}\@$options{'fromhost'} '$cmd');
+		($options{'rootsz'}) = ($options{'rootsz'} =~ /(\d+)(?:\:|\s)/);
+		# ceil to GiB, lv size may be too small in case of `du` calculation
+		$options{'rootsz'} += 1024**2 - ($options{'rootsz'} % 1024**2) if $options{'rootsz'} % 1024**2;
+		$options{'rootsz'} .= 'K';
+	}
 }
 
 sub re_rsync
@@ -65,7 +63,6 @@ sub re_rsync
 		if system("ssh $options{'remuser'}\@$options{'fromhost'} vzctl mount $options{'remname'} 1>/dev/null");
 
 	print "Re-rsyncing container $options{'contname'}...\n";
-
 	die "Failed to re-rsync root filesystem!\n\n"
 		if system("rsync $rsync_opts -e ssh $options{'remuser'}\@$options{'fromhost'}:/var/lib/vz/root/$options{'remname'}/ $root_mount_path/$options{'contname'}/rootfs/");
 
@@ -85,7 +82,6 @@ sub vz_migrate
 	$rsync_opts =~ s/-e\h*ssh\h*//;
 	$rsync_opts .= ' '.$options{'rsync'};
 	$rsync_opts =~ s/%veid%/$options{'remname'}/g;
-	print "$rsync_opts\n";
 
 	if ($options{'createnew'}) {
 		die "Failed to create container!\n\n"
@@ -98,7 +94,7 @@ sub vz_migrate
 
 	print "Rsync'ing VZ container...\n";
 	my $cmd=qq(rsync $rsync_opts -e ssh $options{'remuser'}\@$options{'fromhost'}:/var/lib/vz/root/$options{'remname'}/ $root_mount_path/$options{'contname'}/rootfs/);
-	print "$cmd\n";
+	print "Running $cmd\n";
 	print "There were some errors during rsyncing root filesystem. It's definitely NOT okay if it was the only rsync pass.\n\n"
 		if system($cmd);
 	$self->re_rsync();
@@ -125,11 +121,14 @@ sub migrate_configuration
 	($vz_iface_name) = ($vz_iface_name =~ /ifname=([^,"]+)/);
 	my $lxc_iface_name = qx(egrep lxc.network.name /var/lib/lxc/$options{'contname'}/config);
 	($lxc_iface_name) = ($lxc_iface_name =~ /lxc\.network\.name\h*=\h*(\S+)/);
-	print "Changing $lxc_iface_name to $vz_iface_name\n";
-	my $cmd = qq(perl -i.bak -pe 's/\\b(?:$lxc_iface_name)\\b/$vz_iface_name/' /var/lib/lxc/$options{'contname'}/config);
-	print "$cmd\n";
-	die "Failed to migrate iface name!\n\n" if
-		system("$cmd");
+
+	if ($lxc_iface_name ne $vz_iface_name) {
+		print "Changing $lxc_iface_name to $vz_iface_name\n";
+		my $cmd = qq(perl -i.bak -pe 's/\\b(?:$lxc_iface_name)\\b/$vz_iface_name/' /var/lib/lxc/$options{'contname'}/config);
+		print "Running $cmd\n";
+		die "Failed to migrate iface name!\n\n" if
+			system("$cmd");
+	}
 
 	print "Clearing $root_mount_path/$options{'contname'}/rootfs/etc/fstab ...\n";
 	die "Failed to remove fstab!\n\n" if
