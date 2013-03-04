@@ -98,21 +98,17 @@ sub vz_migrate
 	print "There were some errors during rsyncing root filesystem. It's definitely NOT okay if it was the only rsync pass.\n\n"
 		if system($cmd);
 	$self->re_rsync();
-
-	if (-e "$root_mount_path/$options{'contname'}/rootfs/etc/init/openvz.conf") {
-		print "Found upstart openvz.conf. Modifying...\n";
-		system("sed -i.bak 's/^.*devpts.*\$//' $root_mount_path/$options{'contname'}/rootfs/etc/init/openvz.conf");
-	}
-
-	if ($options{'afterstart'} != 0) {
-		die "Failed to start container $options{'contname'}!\n\n"
-			if system("lxctl start $options{'contname'}");
-	}
 }
 
 sub migrate_configuration
 {
 	my $self = shift;
+	if (-e "$root_mount_path/$options{'contname'}/rootfs/etc/init/openvz.conf")
+	{
+		print "Found upstart openvz.conf. Modifying...\n";
+		system("sed -i.bak 's/^.*devpts.*\$//'
+				$root_mount_path/$options{'contname'}/rootfs/etc/init/openvz.conf");
+	}
 
 	die "Failed to migrate MTU!\n\n"
 		if system("lxctl set $options{'contname'} --mtu \$(ssh $options{'remuser'}\@$options{'fromhost'} \"sed -n 's/^[\\t ]\\+mtu[\\t ]\\+\\([0-9]\\+\\)/\\1/p' /var/lib/vz/private/$options{'remname'}/etc/network/interfaces | awk '{print \$2}'\")");
@@ -122,7 +118,7 @@ sub migrate_configuration
 	my $lxc_iface_name = qx(egrep lxc.network.name /var/lib/lxc/$options{'contname'}/config);
 	($lxc_iface_name) = ($lxc_iface_name =~ /lxc\.network\.name\h*=\h*(\S+)/);
 
-	if ($lxc_iface_name ne $vz_iface_name) {
+	if ($lxc_iface_name && $vz_iface_name && ($lxc_iface_name ne $vz_iface_name)) {
 		print "Changing $lxc_iface_name to $vz_iface_name\n";
 		my $cmd = qq(perl -i.bak -pe 's/\\b(?:$lxc_iface_name)\\b/$vz_iface_name/' /var/lib/lxc/$options{'contname'}/config);
 		print "Running $cmd\n";
@@ -145,6 +141,11 @@ sub do
 	$self->migrate_get_opt();
 	$self->vz_migrate();
 	$self->migrate_configuration();
+	
+	if ($options{'afterstart'} != 0) {
+		die "Failed to start container $options{'contname'}!\n\n"
+		if system("lxctl start $options{'contname'}");
+	}
 }
 
 sub new
